@@ -1,0 +1,7 @@
+# local runtime files
+config.json
+events.jsonl
+state.json
+
+# Rust build output
+/target/

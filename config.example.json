@@ -1,0 +1,26 @@
+{
+  "http": {
+    "endpoint_url": "http://<ip_address>/api/status",
+    "headers": null,
+    "timeout_secs": 10
+  },
+  "pointers": {
+    "json_pointer_all_time": "/bestDiff",
+    "json_pointer_boot_best": "/bestSessionDiff",
+    "json_pointer_uptime_secs": "/uptimeSeconds",
+    "json_pointer_boot_id": null,
+    "json_pointer_hashrate_ths": "/hashrateTHs",
+    "json_pointer_efficiency_j_per_th": "/efficiencyJperTH"
+  },
+  "poll_interval_secs": 10,
+  "storage": {
+    "events_path": "events.jsonl",
+    "state_path": "state.json"
+  },
+  "thresholds": {
+    "epsilon_hashrate_ths": 0.01,
+    "epsilon_efficiency_j_per_th": 0.01
+  }
+}
+
+
