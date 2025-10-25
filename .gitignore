@@ -1,7 +1,10 @@
 # local runtime files
 config.json
 events.jsonl
-state.json
+myBitAxeInfo.json
 
 # Rust build output
 /target/
+
+#temp run data
+/tmp/

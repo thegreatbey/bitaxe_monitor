@@ -7,17 +7,21 @@ use crate::metrics::{extract_metrics_from_json, DetectionOutcome, ExtractedMetri
 use crate::persist::{append_event_jsonl, load_state, save_state};
 use anyhow::{Context, Result};
 use chrono::Utc;
-use reqwest::Client;
+use clap::Parser;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use reqwest::Client;
 use serde_json::Value;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::signal;
-use clap::Parser;
 
 //simple CLI for toggling summary mode
 #[derive(Debug, Parser)]
-#[command(name = "bitaxe_monitor", version, about = "Polls device metrics and tracks bests")] 
+#[command(
+    name = "bitaxe_monitor",
+    version,
+    about = "Polls device metrics and tracks bests"
+)]
 struct Cli {
     /// Print saved best metrics and exit
     #[arg(long)]
@@ -44,9 +48,14 @@ async fn main() -> Result<()> {
         .with_context(|| format!("failed to load config at {:?}", config_path))?;
 
     //support a quick summary mode via --summary or bare "summary" arg
-    let wants_summary = cli.summary || std::env::args().skip(1).any(|a| a == "summary" || a == "--summary");
+    let wants_summary = cli.summary
+        || std::env::args()
+            .skip(1)
+            .any(|a| a == "summary" || a == "--summary");
     if wants_summary {
-        if maybe_print_summary_and_exit(&config)? { return Ok(()); }
+        if maybe_print_summary_and_exit(&config)? {
+            return Ok(());
+        }
     }
 
     //prepare http client with sensible timeouts
@@ -92,6 +101,19 @@ async fn main() -> Result<()> {
         }),
     )?;
 
+    //mask the endpoint url for security
+    fn mask_endpoint(url: &str) -> String {
+        if let Some(x) = url.find("://") {
+            let (scheme, _rest) = url.split_at(x + 3); // keep "http://"
+            let (_host, _tail) = _rest.split_once('/').unwrap_or((_rest, ""));// HIDE HOST/PATH so we dont need host or tail
+            format!("{}[HIDDEN_ENDPOINT EVEN IF RUNNING LOCALLY]", scheme)
+                } else {
+                "[HOST-HIDDEN]".to_string()
+            }
+    }
+
+    //print service start message WITH MASKED ENDPOINT URL FOR SECURITY
+    println!("Starting [bitaxe_monitor] service: polling {} every {}s -> to exit, press Ctrl+C", mask_endpoint(&config.http.endpoint_url), config.poll_interval_secs);
     //do one poll immediately so first data shows up without waiting a full interval
     if let Err(err) = poll_once(&client, &config, &mut state).await {
         //log errors to events file so failures are visible later
@@ -101,7 +123,7 @@ async fn main() -> Result<()> {
                 "ts": Utc::now(),
                 "event": "poll_error",
                 "error": err.to_string()
-            })
+            }),
         );
     }
 
@@ -123,12 +145,28 @@ async fn main() -> Result<()> {
                 }
             }
             _ = signal::ctrl_c() => {
-                append_event_jsonl(
-                    &config.storage.events_path,
-                    serde_json::json!({"ts": Utc::now(), "event": "service_stop"}),
-                )?;
-                save_state(&config.storage.state_path, &state)?;
+                let ts = Utc::now();
+            let mut errs: Vec<String> = Vec::new();
+
+            if let Err(err) = append_event_jsonl(
+                &config.storage.events_path,
+                serde_json::json!({"ts": ts, "event": "service_stop"}),
+            ) {
+                eprintln!("[bitaxe_monitor] WARN: failed to write service_stop: {err}");
+                errs.push(format!("service_stop: {err}"));
+            }
+
+            if let Err(err) = save_state(&config.storage.state_path, &state) {
+                eprintln!("[bitaxe_monitor] WARN: failed to save myBitAxeInfo.json: {err}");
+                errs.push(format!("save_state: {err}"));
+            }
+
+            if errs.is_empty() {
+                println!("[bitaxe_monitor] Graceful shutdown received → saved myBitAxeInfo.json and wrote service_stop to events.jsonl");
                 break;
+            } else {
+                return Err(anyhow::anyhow!("shutdown errors: {}", errs.join("; ")));
+            }
             }
         }
     }
@@ -138,18 +176,37 @@ async fn main() -> Result<()> {
 //check command-line args for a summary flag; if present, print best metrics and exit
 fn maybe_print_summary_and_exit(config: &AppConfig) -> Result<bool> {
     //accept either "summary" or "--summary" for convenience
-    let has_summary_flag = std::env::args().skip(1).any(|a| a == "summary" || a == "--summary");
-    if !has_summary_flag { return Ok(false); }
+    let has_summary_flag = std::env::args()
+        .skip(1)
+        .any(|a| a == "summary" || a == "--summary");
+    if !has_summary_flag {
+        return Ok(false);
+    }
 
     //load saved state so we can report best values observed so far
     match load_state(&config.storage.state_path) {
         Ok(state) => {
             println!("state file: {}", &config.storage.state_path);
-            if let Some(v) = state.tool_best_hashrate_ths { println!("best hashrate: {:.2} TH/s", v); } else { println!("best hashrate: n/a"); }
-            if let Some(v) = state.tool_best_efficiency_j_per_th { println!("best efficiency: {:.2} J/TH", v); } else { println!("best efficiency: n/a"); }
-            if let Some(v) = state.last_displayed_all_time { println!("device all-time best: {:.2}", v); }
-            if let Some(v) = state.last_displayed_boot_best { println!("device boot best: {:.2}", v); }
-            println!("monitor global best (internal): {:.2}", state.tool_global_all_time_best);
+            if let Some(v) = state.tool_best_hashrate_ths {
+                println!("best hashrate: {:.2} TH/s", v);
+            } else {
+                println!("best hashrate: n/a");
+            }
+            if let Some(v) = state.tool_best_efficiency_j_per_th {
+                println!("best efficiency: {:.2} J/TH", v);
+            } else {
+                println!("best efficiency: n/a");
+            }
+            if let Some(v) = state.last_displayed_all_time {
+                println!("device all-time best: {:.2}", v);
+            }
+            if let Some(v) = state.last_displayed_boot_best {
+                println!("device boot best: {:.2}", v);
+            }
+            println!(
+                "monitor global best (internal): {:.2}",
+                state.tool_global_all_time_best
+            );
         }
         Err(_) => {
             println!("state file not found yet: {}", &config.storage.state_path);
@@ -162,19 +219,40 @@ fn maybe_print_summary_and_exit(config: &AppConfig) -> Result<bool> {
 async fn poll_once(client: &Client, config: &AppConfig, state: &mut MonitorState) -> Result<()> {
     //fetch the endpoint json with simple retry/backoff so transient network errors do not cause missed polls
     let text = fetch_text_with_retries(client, config, 3, Duration::from_millis(500)).await?;
-    let json: Value = serde_json::from_str(&text)
-        .with_context(|| "endpoint did not return valid json")?;
+    let json: Value =
+        serde_json::from_str(&text).with_context(|| "endpoint did not return valid json")?;
 
     //pull metric numbers from json using user-provided json pointers
-    let ExtractedMetrics { displayed_all_time, displayed_boot_best, uptime_secs, boot_id, hashrate_ths, efficiency_j_per_th } =
-        extract_metrics_from_json(&json, &config.pointers)
-            .with_context(|| "failed extracting metrics using json pointers")?;
+    let ExtractedMetrics {
+        displayed_all_time,
+        displayed_boot_best,
+        uptime_secs,
+        boot_id,
+        hashrate_ths,
+        efficiency_j_per_th,
+    } = extract_metrics_from_json(&json, &config.pointers)
+        .with_context(|| "failed extracting metrics using json pointers")?;
 
     //evaluate for reboots and new bests
     let (eps_hash, eps_eff) = if let Some(t) = &config.thresholds {
-        (t.epsilon_hashrate_ths.unwrap_or(0.01), t.epsilon_efficiency_j_per_th.unwrap_or(0.01))
-    } else { (0.01, 0.01) };
-    let outcome = metrics::detect_changes(state, displayed_all_time, displayed_boot_best, uptime_secs, boot_id.as_deref(), hashrate_ths, efficiency_j_per_th, eps_hash, eps_eff);
+        (
+            t.epsilon_hashrate_ths.unwrap_or(0.01),
+            t.epsilon_efficiency_j_per_th.unwrap_or(0.01),
+        )
+    } else {
+        (0.01, 0.01)
+    };
+    let outcome = metrics::detect_changes(
+        state,
+        displayed_all_time,
+        displayed_boot_best,
+        uptime_secs,
+        boot_id.as_deref(),
+        hashrate_ths,
+        efficiency_j_per_th,
+        eps_hash,
+        eps_eff,
+    );
 
     //record events and persist state
     handle_detection_outcome(&config.storage.events_path, state, outcome)?;
@@ -184,7 +262,12 @@ async fn poll_once(client: &Client, config: &AppConfig, state: &mut MonitorState
 }
 
 //make a few attempts with exponential backoff to get a response so short network glitches do not surface as errors
-async fn fetch_text_with_retries(client: &Client, config: &AppConfig, max_retries: usize, base_delay: Duration) -> Result<String> {
+async fn fetch_text_with_retries(
+    client: &Client,
+    config: &AppConfig,
+    max_retries: usize,
+    base_delay: Duration,
+) -> Result<String> {
     let mut attempt: usize = 0;
     loop {
         //rebuild request each attempt because RequestBuilder is single-use
@@ -239,12 +322,17 @@ async fn preflight_check(client: &Client, config: &AppConfig) -> Result<()> {
     let text = fetch_text_with_retries(client, config, 2, Duration::from_millis(300)).await?;
     let json: Value = serde_json::from_str(&text)
         .with_context(|| "endpoint did not return valid json during preflight")?;
-    let _ = extract_metrics_from_json(&json, &config.pointers)
-        .with_context(|| "failed extracting metrics during preflight using configured json pointers")?;
+    let _ = extract_metrics_from_json(&json, &config.pointers).with_context(|| {
+        "failed extracting metrics during preflight using configured json pointers"
+    })?;
     Ok(())
 }
 
-fn handle_detection_outcome(path: &str, state: &MonitorState, outcome: DetectionOutcome) -> Result<()> {
+fn handle_detection_outcome(
+    path: &str,
+    state: &MonitorState,
+    outcome: DetectionOutcome,
+) -> Result<()> {
     //write structured events based on detected changes so the events log shows reboots and new records in order
     let now = Utc::now();
 
@@ -322,5 +410,3 @@ fn handle_detection_outcome(path: &str, state: &MonitorState, outcome: Detection
 
     Ok(())
 }
-
-

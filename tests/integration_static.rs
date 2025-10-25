@@ -1,4 +1,4 @@
-use bitaxe_monitor::config::{AppConfig, HttpConfig, JsonPointers, StorageConfig};
+use bitaxe_monitor::config::JsonPointers;
 use bitaxe_monitor::metrics::{detect_changes, extract_metrics_from_json, MonitorState};
 
 #[test]
@@ -21,6 +21,8 @@ fn extractor_and_state_flow_over_static_json() {
         json_pointer_boot_id: Some("/boot_id".into()),
         json_pointer_hashrate_ths: Some("/hashrate".into()),
         json_pointer_efficiency_j_per_th: Some("/efficiency".into()),
+        json_pointer_power_w: None,
+        hashrate_scale: None,
     };
 
     // extract metrics
@@ -46,5 +48,3 @@ fn extractor_and_state_flow_over_static_json() {
     assert!(out.new_device_all_time_best.is_some());
     assert!(out.new_device_boot_best.is_some());
 }
-
-

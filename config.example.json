@@ -1,6 +1,6 @@
 {
   "http": {
-    "endpoint_url": "http://<ip_address>/api/status",
+    "endpoint_url": "http://<ip_address>/api/sys/info",
     "headers": null,
     "timeout_secs": 10
   },
@@ -10,12 +10,14 @@
     "json_pointer_uptime_secs": "/uptimeSeconds",
     "json_pointer_boot_id": null,
     "json_pointer_hashrate_ths": "/hashrateTHs",
-    "json_pointer_efficiency_j_per_th": "/efficiencyJperTH"
+    "json_pointer_efficiency_j_per_th": null,
+    "json_pointer_power_w": "/power",
+    "hashrate_scale": 0.001
   },
   "poll_interval_secs": 10,
   "storage": {
     "events_path": "events.jsonl",
-    "state_path": "state.json"
+    "state_path": "myBitAxeInfo.json"
   },
   "thresholds": {
     "epsilon_hashrate_ths": 0.01,
