@@ -105,15 +105,19 @@ async fn main() -> Result<()> {
     fn mask_endpoint(url: &str) -> String {
         if let Some(x) = url.find("://") {
             let (scheme, _rest) = url.split_at(x + 3); // keep "http://"
-            let (_host, _tail) = _rest.split_once('/').unwrap_or((_rest, ""));// HIDE HOST/PATH so we dont need host or tail
+            let (_host, _tail) = _rest.split_once('/').unwrap_or((_rest, "")); // HIDE HOST/PATH so we dont need host or tail
             format!("{}[HIDDEN_ENDPOINT EVEN IF RUNNING LOCALLY]", scheme)
-                } else {
-                "[HOST-HIDDEN]".to_string()
-            }
+        } else {
+            "[HOST-HIDDEN]".to_string()
+        }
     }
 
     //print service start message WITH MASKED ENDPOINT URL FOR SECURITY
-    println!("Starting [bitaxe_monitor] service: polling {} every {}s -> to exit, press Ctrl+C", mask_endpoint(&config.http.endpoint_url), config.poll_interval_secs);
+    println!(
+        "Starting [bitaxe_monitor] service: polling {} every {}s -> to exit, press Ctrl+C",
+        mask_endpoint(&config.http.endpoint_url),
+        config.poll_interval_secs
+    );
     //do one poll immediately so first data shows up without waiting a full interval
     if let Err(err) = poll_once(&client, &config, &mut state).await {
         //log errors to events file so failures are visible later

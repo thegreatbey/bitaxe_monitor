@@ -188,7 +188,9 @@ pub fn detect_changes(
     // prefer explicit boot_id changes; otherwise detect when uptime decreases; finally, fall back to device boot-best reset
     let boot_id_changed = match (state.last_boot_marker.as_ref(), boot_id) {
         // compare only when the previous marker was also a boot_id (not an uptime-derived marker)
-        (Some(prev_marker), Some(curr_id)) if !prev_marker.starts_with("uptime:") => prev_marker != curr_id,
+        (Some(prev_marker), Some(curr_id)) if !prev_marker.starts_with("uptime:") => {
+            prev_marker != curr_id
+        }
         _ => false,
     };
 
