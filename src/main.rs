@@ -3,7 +3,10 @@ mod metrics;
 mod persist;
 
 use crate::config::AppConfig;
-use crate::metrics::{extract_metrics_from_json, DetectionOutcome, ExtractedMetrics, MonitorState};
+use crate::metrics::{
+    extract_metrics_from_json, DetectionOutcome, Displayed, ExtractedMetrics, Metrics,
+    MonitorState, Thresholds,
+};
 use crate::persist::{append_event_jsonl, load_state, save_state};
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -52,10 +55,8 @@ async fn main() -> Result<()> {
         || std::env::args()
             .skip(1)
             .any(|a| a == "summary" || a == "--summary");
-    if wants_summary {
-        if maybe_print_summary_and_exit(&config)? {
-            return Ok(());
-        }
+    if wants_summary && maybe_print_summary_and_exit(&config)? {
+        return Ok(());
     }
 
     //prepare http client with sensible timeouts
@@ -246,17 +247,21 @@ async fn poll_once(client: &Client, config: &AppConfig, state: &mut MonitorState
     } else {
         (0.01, 0.01)
     };
-    let outcome = metrics::detect_changes(
-        state,
-        displayed_all_time,
-        displayed_boot_best,
+    let displayed = Displayed {
+        all_time: displayed_all_time,
+        boot_best: displayed_boot_best,
+    };
+    let metrics_values = Metrics {
         uptime_secs,
-        boot_id.as_deref(),
+        boot_id,
         hashrate_ths,
         efficiency_j_per_th,
-        eps_hash,
-        eps_eff,
-    );
+    };
+    let thresholds = Thresholds {
+        epsilon_hashrate_ths: eps_hash,
+        epsilon_efficiency_j_per_th: eps_eff,
+    };
+    let outcome = metrics::detect_changes(state, displayed, metrics_values, thresholds);
 
     //record events and persist state
     handle_detection_outcome(&config.storage.events_path, state, outcome)?;
