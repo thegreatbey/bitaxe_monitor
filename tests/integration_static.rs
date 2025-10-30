@@ -1,5 +1,7 @@
 use bitaxe_monitor::config::JsonPointers;
-use bitaxe_monitor::metrics::{detect_changes, extract_metrics_from_json, MonitorState};
+use bitaxe_monitor::metrics::{
+    detect_changes, extract_metrics_from_json, Displayed, Metrics, MonitorState, Thresholds,
+};
 
 #[test]
 fn extractor_and_state_flow_over_static_json() {
@@ -32,17 +34,21 @@ fn extractor_and_state_flow_over_static_json() {
 
     // run through state change detection once
     let mut state = MonitorState::new();
-    let out = detect_changes(
-        &mut state,
-        m.displayed_all_time,
-        m.displayed_boot_best,
-        m.uptime_secs,
-        m.boot_id.as_deref(),
-        m.hashrate_ths,
-        m.efficiency_j_per_th,
-        0.01,
-        0.01,
-    );
+    let displayed = Displayed {
+        all_time: m.displayed_all_time,
+        boot_best: m.displayed_boot_best,
+    };
+    let metrics = Metrics {
+        uptime_secs: m.uptime_secs,
+        boot_id: m.boot_id,
+        hashrate_ths: m.hashrate_ths,
+        efficiency_j_per_th: m.efficiency_j_per_th,
+    };
+    let thresholds = Thresholds {
+        epsilon_hashrate_ths: 0.01,
+        epsilon_efficiency_j_per_th: 0.01,
+    };
+    let out = detect_changes(&mut state, displayed, metrics, thresholds);
 
     // first run should set initial bests
     assert!(out.new_device_all_time_best.is_some());

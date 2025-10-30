@@ -51,6 +51,26 @@ pub struct DetectionOutcome {
     pub new_tool_best_efficiency_j_per_th: Option<f64>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct Metrics {
+    pub uptime_secs: Option<u64>,
+    pub boot_id: Option<String>,
+    pub hashrate_ths: Option<f64>,
+    pub efficiency_j_per_th: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Thresholds {
+    pub epsilon_hashrate_ths: f64,
+    pub epsilon_efficiency_j_per_th: f64,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Displayed {
+    pub all_time: f64,
+    pub boot_best: f64,
+}
+
 pub fn extract_metrics_from_json(
     json: &Value,
     ptrs: &JsonPointers,
@@ -91,8 +111,8 @@ pub fn extract_metrics_from_json(
         }
     }
 
-    fn extract_string_opt<'a>(
-        json: &'a Value,
+    fn extract_string_opt(
+        json: &Value,
         pointer_opt: &Option<String>,
     ) -> anyhow::Result<Option<String>> {
         if let Some(pointer) = pointer_opt.as_ref() {
@@ -164,29 +184,26 @@ pub fn extract_metrics_from_json(
 
 pub fn detect_changes(
     state: &mut MonitorState,
-    displayed_all_time: f64,
-    displayed_boot_best: f64,
-    uptime_secs: Option<u64>,
-    boot_id: Option<&str>,
-    hashrate_ths: Option<f64>,
-    efficiency_j_per_th: Option<f64>,
-    epsilon_hashrate_ths: f64,
-    epsilon_efficiency_j_per_th: f64,
+    displayed: Displayed,
+    metrics: Metrics,
+    thresholds: Thresholds,
 ) -> DetectionOutcome {
     let mut out = DetectionOutcome::default();
 
+    let displayed_all_time = displayed.all_time;
+    let displayed_boot_best = displayed.boot_best;
+    let uptime_secs = metrics.uptime_secs;
+    let boot_id_str = metrics.boot_id.as_deref();
+
     //derive boot marker priority: boot_id > uptime_secs > boot_best reset heuristic
-    let current_marker = if let Some(id) = boot_id {
-        Some(id.to_string())
-    } else if let Some(up) = uptime_secs {
-        Some(format!("uptime:{}", up))
-    } else {
-        None
-    };
+    //used combinators map and or_else to simplify the code
+    let current_marker = boot_id_str
+        .map(|id| id.to_string())
+        .or_else(|| uptime_secs.map(|up| format!("uptime:{}", up)));
 
     //detect reboot only on real signals so we do not emit on every poll
     // prefer explicit boot_id changes; otherwise detect when uptime decreases; finally, fall back to device boot-best reset
-    let boot_id_changed = match (state.last_boot_marker.as_ref(), boot_id) {
+    let boot_id_changed = match (state.last_boot_marker.as_ref(), boot_id_str) {
         // compare only when the previous marker was also a boot_id (not an uptime-derived marker)
         (Some(prev_marker), Some(curr_id)) if !prev_marker.starts_with("uptime:") => {
             prev_marker != curr_id
@@ -239,10 +256,10 @@ pub fn detect_changes(
     }
 
     // track best hashrate (max). only compare when value present and finite
-    if let Some(h) = hashrate_ths.filter(|v| v.is_finite()) {
+    if let Some(h) = metrics.hashrate_ths.filter(|v| v.is_finite()) {
         //require small improvement to avoid jitter updates
         let is_better = match state.tool_best_hashrate_ths {
-            Some(prev) => h - prev >= epsilon_hashrate_ths,
+            Some(prev) => h - prev >= thresholds.epsilon_hashrate_ths,
             None => true,
         };
         if is_better {
@@ -252,10 +269,10 @@ pub fn detect_changes(
     }
 
     // track best efficiency (min J/TH). only compare when value present and finite
-    if let Some(eff) = efficiency_j_per_th.filter(|v| v.is_finite()) {
+    if let Some(eff) = metrics.efficiency_j_per_th.filter(|v| v.is_finite()) {
         //require small decrease to avoid jitter updates
         let is_better = match state.tool_best_efficiency_j_per_th {
-            Some(prev) => prev - eff >= epsilon_efficiency_j_per_th,
+            Some(prev) => prev - eff >= thresholds.epsilon_efficiency_j_per_th,
             None => true,
         };
         if is_better {
@@ -324,37 +341,59 @@ mod tests {
     fn test_detect_changes_boot_and_bests() {
         let mut state = MonitorState::new();
         // initial values should set new bests
-        let out1 = detect_changes(
-            &mut state,
-            10.0,
-            5.0,
-            Some(100),
-            None,
-            None,
-            None,
-            0.01,
-            0.01,
-        );
+        let displayed = Displayed {
+            all_time: 10.0,
+            boot_best: 5.0,
+        };
+        let metrics = Metrics {
+            uptime_secs: Some(100),
+            boot_id: None,
+            hashrate_ths: None,
+            efficiency_j_per_th: None,
+        };
+        let thresholds = Thresholds {
+            epsilon_hashrate_ths: 0.01,
+            epsilon_efficiency_j_per_th: 0.01,
+        };
+        let out1 = detect_changes(&mut state, displayed, metrics, thresholds);
         assert!(out1.new_device_all_time_best.is_some());
         assert!(out1.new_device_boot_best.is_some());
         assert!(out1.new_tool_all_time_best.is_some());
 
         // higher boot best updates boot best and tool best
-        let out2 = detect_changes(
-            &mut state,
-            10.0,
-            6.0,
-            Some(110),
-            None,
-            None,
-            None,
-            0.01,
-            0.01,
-        );
+        let displayed = Displayed {
+            all_time: 10.0,
+            boot_best: 6.0,
+        };
+        let metrics = Metrics {
+            uptime_secs: Some(110),
+            boot_id: None,
+            hashrate_ths: None,
+            efficiency_j_per_th: None,
+        };
+        let thresholds = Thresholds {
+            epsilon_hashrate_ths: 0.01,
+            epsilon_efficiency_j_per_th: 0.01,
+        };
+        let out2 = detect_changes(&mut state, displayed, metrics, thresholds);
         assert!(out2.new_device_boot_best.is_some());
 
         // simulate reboot via uptime drop
-        let out3 = detect_changes(&mut state, 9.0, 4.0, Some(10), None, None, None, 0.01, 0.01);
+        let displayed = Displayed {
+            all_time: 9.0,
+            boot_best: 4.0,
+        };
+        let metrics = Metrics {
+            uptime_secs: Some(10),
+            boot_id: None,
+            hashrate_ths: None,
+            efficiency_j_per_th: None,
+        };
+        let thresholds = Thresholds {
+            epsilon_hashrate_ths: 0.01,
+            epsilon_efficiency_j_per_th: 0.01,
+        };
+        let out3 = detect_changes(&mut state, displayed, metrics, thresholds);
         assert!(out3.boot_detected);
     }
 
@@ -369,29 +408,37 @@ mod tests {
     fn test_detect_changes_boot_id_priority() {
         let mut state = MonitorState::new();
         // initial with boot_id "A"
-        let _ = detect_changes(
-            &mut state,
-            1.0,
-            1.0,
-            Some(50),
-            Some("A"),
-            None,
-            None,
-            0.01,
-            0.01,
-        );
+        let displayed = Displayed {
+            all_time: 1.0,
+            boot_best: 1.0,
+        };
+        let metrics = Metrics {
+            uptime_secs: Some(50),
+            boot_id: Some("A".to_string()),
+            hashrate_ths: None,
+            efficiency_j_per_th: None,
+        };
+        let thresholds = Thresholds {
+            epsilon_hashrate_ths: 0.01,
+            epsilon_efficiency_j_per_th: 0.01,
+        };
+        let _ = detect_changes(&mut state, displayed, metrics, thresholds);
         // change only boot_id to "B" (uptime increases), expect boot_detected
-        let out = detect_changes(
-            &mut state,
-            1.1,
-            1.1,
-            Some(60),
-            Some("B"),
-            None,
-            None,
-            0.01,
-            0.01,
-        );
+        let displayed = Displayed {
+            all_time: 1.1,
+            boot_best: 1.1,
+        };
+        let metrics = Metrics {
+            uptime_secs: Some(60),
+            boot_id: Some("B".to_string()),
+            hashrate_ths: None,
+            efficiency_j_per_th: None,
+        };
+        let thresholds = Thresholds {
+            epsilon_hashrate_ths: 0.01,
+            epsilon_efficiency_j_per_th: 0.01,
+        };
+        let out = detect_changes(&mut state, displayed, metrics, thresholds);
         assert!(out.boot_detected);
     }
 
