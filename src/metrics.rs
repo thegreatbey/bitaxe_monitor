@@ -13,6 +13,8 @@ pub struct MonitorState {
     // track tool-best hashrate (max TH/s) and efficiency (min J/TH)
     pub tool_best_hashrate_ths: Option<f64>,
     pub tool_best_efficiency_j_per_th: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub _note: Option<String>,
 }
 
 impl MonitorState {
@@ -25,6 +27,7 @@ impl MonitorState {
             tool_global_all_time_best: 0.0,
             tool_best_hashrate_ths: None,
             tool_best_efficiency_j_per_th: None,
+            _note: None,
         }
     }
 }

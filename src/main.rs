@@ -161,6 +161,10 @@ async fn main() -> Result<()> {
                 errs.push(format!("service_stop: {err}"));
             }
 
+            //add guidance so users know full history of records lives in events.jsonl
+            //this message explains that this file only keeps the latest values
+            let mut state = state.clone();
+            state._note = Some("historical bests (past records) are logged in events.jsonl; this file stores only the latest values".to_string());
             if let Err(err) = save_state(&config.storage.state_path, &state) {
                 eprintln!("[bitaxe_monitor] WARN: failed to save myBitAxeInfo.json: {err}");
                 errs.push(format!("save_state: {err}"));
@@ -265,6 +269,8 @@ async fn poll_once(client: &Client, config: &AppConfig, state: &mut MonitorState
 
     //record events and persist state
     handle_detection_outcome(&config.storage.events_path, state, outcome)?;
+    //add guidance so users know full history of records lives in events.jsonl
+    state._note = Some("historical bests (past records) are logged in events.jsonl; this file stores only the latest values".to_string());
     save_state(&config.storage.state_path, state)?;
 
     Ok(())
